@@ -5,18 +5,21 @@
 #include <math.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <math.h>
 
-#define DATA 6
+#define DATA 4
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 32
 #define OLED_RESET -1
 #define SCREEN_ADDRESS 0x3C
+int temperatureSave = 0;
 
 OneWire ourWire(DATA);
 DallasTemperature sensors(&ourWire);
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 void sendFloatAsBytes(int value);
+void recibeSignalToEsp();
 
 void setup()
 {
@@ -24,9 +27,8 @@ void setup()
   while (!Serial)
     ;
 
-  Serial.println("CAN Sender");
   sensors.begin();
-  // start the CAN bus at 500 kbps
+  Serial.println("Obteniendo la dirección del sensor...");
   if (!CAN.begin(500E3))
   {
     Serial.println("Starting CAN failed!");
@@ -38,12 +40,11 @@ void setup()
   {
     Serial.println(F("SSD1306 allocation failed"));
     for (;;)
-      ; // Don't proceed, loop forever
+      ;
   }
   display.display();
-  delay(2000); // Pause for 2 seconds
+  delay(2000);
 
-  // Clear the buffer
   display.clearDisplay();
   display.display();
 }
@@ -51,16 +52,10 @@ void setup()
 void loop()
 {
   sensors.requestTemperatures();
-  int temperature = static_cast<int>(round(sensors.getTempCByIndex(0)));
+  float temperature = sensors.getTempCByIndex(0);
+  int temperatureRounded = round(temperature);
   Serial.print(temperature);
   Serial.println();
-
-  // send extended packet: id is 29 bits, packet can contain up to 8 bytes of data
-  Serial.print("Sending extended packet ... ");
-
-  sendFloatAsBytes(temperature);
-  Serial.println("done");
-  delay(1000);
 
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
@@ -71,6 +66,15 @@ void loop()
   display.print("C");
   display.display();
 
+  if (temperatureSave != temperatureRounded)
+  {
+    temperatureSave = temperatureRounded;
+    Serial.print("Sending extended packet ... ");
+    sendFloatAsBytes(temperatureRounded);
+    Serial.println("done");
+    Serial.print((char)temperatureRounded);
+  }
+  recibeSignalToEsp();
   delay(1000);
 }
 
@@ -79,4 +83,29 @@ void sendFloatAsBytes(int value)
   CAN.beginPacket(0x12, 1);
   CAN.write(value);
   CAN.endPacket();
+}
+
+void recibeSignalToEsp()
+{
+  while (CAN.available())
+  {
+    int packetSize = CAN.parsePacket();
+
+    if (packetSize || CAN.packetId() != -1)
+    {
+      if (CAN.packetId() == 0x1)
+      {
+        Serial.print("Received ");
+        Serial.println();
+        display.clearDisplay();
+        display.setTextColor(SSD1306_WHITE);
+        display.setTextSize(1.2);
+        display.setCursor(25, 5);
+        display.print((char)CAN.read());
+        display.display();
+
+        delay(1000);
+      }
+    }
+  }
 }
