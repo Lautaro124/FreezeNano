@@ -13,6 +13,8 @@
 #define OLED_RESET -1
 #define SCREEN_ADDRESS 0x3C
 int temperatureSave = 0;
+unsigned long previousMillis = 0; // Almacena el tiempo del último evento
+const long interval = 500;
 
 OneWire ourWire(DATA);
 DallasTemperature sensors(&ourWire);
@@ -51,61 +53,43 @@ void setup()
 
 void loop()
 {
-  sensors.requestTemperatures();
-  float temperature = sensors.getTempCByIndex(0);
-  int temperatureRounded = round(temperature);
-  Serial.print(temperature);
-  Serial.println();
-
-  display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
-  display.setTextSize(3);
-  display.setCursor(25, 5);
-  display.print(sensors.getTempCByIndex(0), 1);
-  display.setTextSize(1);
-  display.print("C");
-  display.display();
-
-  if (temperatureSave != temperatureRounded)
+  unsigned long currentMillis = millis();
+  if (currentMillis - previousMillis >= interval)
   {
-    temperatureSave = temperatureRounded;
-    Serial.print("Sending extended packet ... ");
-    sendFloatAsBytes(temperatureRounded);
-    Serial.println("done");
-    Serial.print((char)temperatureRounded);
+    sensors.requestTemperatures();
+    float temperature = sensors.getTempCByIndex(0);
+    int temperatureRounded = round(temperature);
+    Serial.print(temperature);
+    Serial.println();
+
+    display.clearDisplay();
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(3);
+    display.setCursor(25, 5);
+    display.print(temperature, 1);
+    display.setTextSize(1);
+    display.print("C");
+    display.display();
+    previousMillis = currentMillis;
+
+    if (temperatureSave != temperatureRounded)
+    {
+      temperatureSave = temperatureRounded;
+      Serial.print("Sending extended packet ... ");
+      sendFloatAsBytes(temperatureRounded);
+      Serial.println("done");
+      Serial.print((char)temperatureRounded);
+    }
   }
-  recibeSignalToEsp();
-  delay(1000);
 }
 
 void sendFloatAsBytes(int value)
 {
-  CAN.beginPacket(0x12, 1);
-  CAN.write(value);
+  const uint8_t valueBytes = static_cast<uint8_t>(value);
+  CAN.beginPacket(0x12);
+  CAN.write(valueBytes);
   CAN.endPacket();
-}
-
-void recibeSignalToEsp()
-{
-  while (CAN.available())
-  {
-    int packetSize = CAN.parsePacket();
-
-    if (packetSize || CAN.packetId() != -1)
-    {
-      if (CAN.packetId() == 0x1)
-      {
-        Serial.print("Received ");
-        Serial.println();
-        display.clearDisplay();
-        display.setTextColor(SSD1306_WHITE);
-        display.setTextSize(1.2);
-        display.setCursor(25, 5);
-        display.print((char)CAN.read());
-        display.display();
-
-        delay(1000);
-      }
-    }
-  }
+  Serial.print("done");
+  Serial.println();
+  Serial.print(valueBytes);
 }
